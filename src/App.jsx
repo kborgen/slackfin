@@ -214,15 +214,14 @@ async function fetchMarine() {
 }
 
 async function askClaude(prompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  const res = await fetch(
+    "https://psobrejvsfnepxgkceqx.supabase.co/functions/v1/ask-slackfin",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    }
+  );
   const data = await res.json();
   const text = (data.content || [])
     .filter((b) => b.type === "text")
