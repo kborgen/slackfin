@@ -445,6 +445,8 @@ export default function Slackfin() {
   const [showAbout, setShowAbout] = useState(false);
   const [showHow, setShowHow] = useState(false);
 
+  const [expandedPhoto, setExpandedPhoto] = useState(null);
+
   useEffect(() => {
     const id = setInterval(() => setNow(pacificNowPseudo()), 60000);
     return () => clearInterval(id);
@@ -921,7 +923,7 @@ Question: ${question}`;
                   />
                 </label>
                 {form.photoPreview && (
-                  <img src={form.photoPreview} alt="Catch preview" className="rounded-lg w-full object-cover" style={{ maxHeight: 160 }} />
+                  <img src={form.photoPreview} alt="Catch preview" className="rounded-lg w-full object-contain" style={{ maxHeight: 160, background: THEME.paper }} />
                 )}
               </div>
               <div style={{ fontSize: 11, color: THEME.slack }}>
@@ -961,7 +963,13 @@ Question: ${question}`;
                         </div>
                       )}
                       {c.photo_url && (
-                        <img src={c.photo_url} alt={c.species} className="rounded-lg w-full object-cover mt-2" style={{ maxHeight: 200 }} />
+                        <img
+                          src={c.photo_url}
+                          alt={c.species}
+                          className="rounded-lg w-full object-contain mt-2 cursor-pointer"
+                          style={{ maxHeight: 200, background: THEME.paper }}
+                          onClick={() => setExpandedPhoto(c.photo_url)}
+                        />
                       )}
                     </div>
                     <button onClick={() => deleteCatch(c.id, c.photo_url)} aria-label="Delete catch" className="shrink-0">
@@ -1011,6 +1019,28 @@ Question: ${question}`;
           </p>
         )}
       </div>
+
+      {expandedPhoto && (
+        <div
+          className="fixed inset-0 flex items-center justify-center p-4 z-50"
+          style={{ background: "rgba(0,0,0,0.85)" }}
+          onClick={() => setExpandedPhoto(null)}
+        >
+          <img
+            src={expandedPhoto}
+            alt="Enlarged catch photo"
+            className="max-w-full max-h-full rounded-lg object-contain"
+          />
+          <button
+            onClick={() => setExpandedPhoto(null)}
+            className="absolute top-4 right-4 rounded-full p-2"
+            style={{ background: THEME.white, color: THEME.ink }}
+            aria-label="Close photo"
+          >
+            <X size={20} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
