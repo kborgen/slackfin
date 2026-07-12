@@ -329,36 +329,37 @@ function Chip({ icon: Icon, label, value, sub }) {
       className="flex flex-col items-start justify-start gap-1 rounded-xl px-3 py-2.5"
       style={{ background: THEME.white, border: `1px solid ${THEME.line}`, minHeight: 84 }}
     >
-      <div className="flex items-center gap-1" style={{ color: THEME.slack }}>
+      <div className="flex items-center gap-1" style={{ color: THEME.slackDeep }}>
         {Icon ? <Icon size={12} strokeWidth={2} /> : null}
-        <span className="uppercase tracking-wide" style={{ fontSize: 11 }}>{label}</span>
+        <span className="uppercase tracking-wide" style={{ fontSize: 12 }}>{label}</span>
       </div>
       <div className="mono leading-none" style={{ fontSize: 18, color: THEME.ink }}>{value}</div>
-      <div style={{ fontSize: 10, color: THEME.slack, minHeight: 12 }}>{sub || "\u00A0"}</div>
+      <div style={{ fontSize: 12, color: THEME.slackDeep, minHeight: 12 }}>{sub || "\u00A0"}</div>
     </div>
   );
 }
 
 function ScoreStamp({ score }) {
-  const color = score >= 70 ? THEME.bite : score >= 45 ? THEME.kelp : THEME.slack;
+  const ringColor = score >= 70 ? THEME.bite : score >= 45 ? THEME.kelp : THEME.slack;
+  const textColor = score >= 70 ? THEME.bite : score >= 45 ? THEME.kelp : THEME.slackDeep;
   const label = score >= 70 ? "GOOD" : score >= 45 ? "FAIR" : "SLOW";
   return (
     <div
       className="flex flex-col items-center justify-center rounded-full shrink-0"
-      style={{ width: 100, height: 100, border: `3px solid ${color}`, color }}
+      style={{ width: 100, height: 100, border: `3px solid ${ringColor}`, color: textColor }}
     >
       <div className="mono text-2xl font-semibold leading-none">
-        {score}<span style={{ fontSize: 12, fontWeight: 400, color: THEME.slack }}>/100</span>
+        {score}<span style={{ fontSize: 12, fontWeight: 400, color: THEME.slackDeep }}>/100</span>
       </div>
-      <div className="tracking-widest mt-1" style={{ fontSize: 10 }}>{label}</div>
+      <div className="tracking-widest mt-1" style={{ fontSize: 12 }}>{label}</div>
     </div>
   );
 }
 
 /* ---------------- tide chart ---------------- */
 
-function TideChart({ series, nowMs, windows, sunEvents, currentPoint }) {
-  const width = 800, height = 260, padL = 42, padR = 10, padT = 16, padB = 26;
+function TideChart({ series, nowMs, windows, sunriseEvents, sunsetEvents, currentPoint }) {
+  const width = 800, height = 320, padL = 48, padR = 12, padT = 20, padB = 32;
   if (!series.length) return null;
   const tMin = series[0].t, tMax = series[series.length - 1].t;
   const vMin = Math.min(...series.map((p) => p.v));
@@ -387,13 +388,13 @@ function TideChart({ series, nowMs, windows, sunEvents, currentPoint }) {
       {yGridLines.map((v, i) => (
         <g key={i}>
           <line x1={padL} x2={width - padR} y1={y(v)} y2={y(v)} stroke={THEME.line} strokeWidth="1" opacity="0.6" />
-          <text x={6} y={y(v) + 3} fontSize="12" fill={THEME.slack} className="mono">{v.toFixed(1)}</text>
+          <text x={6} y={y(v) + 3} fontSize="13" fill={THEME.slackDeep} className="mono">{v.toFixed(1)}</text>
         </g>
       ))}
       {xTicks.map((t, i) => (
         <g key={i}>
           <line x1={x(t)} x2={x(t)} y1={padT} y2={height - padB} stroke={THEME.line} strokeWidth="1" opacity="0.35" />
-          <text x={x(t)} y={height - 6} fontSize="12" fill={THEME.slack} textAnchor="middle" className="mono">
+          <text x={x(t)} y={height - 8} fontSize="13" fill={THEME.slackDeep} textAnchor="middle" className="mono">
             {formatTime(t).replace(":00", "").replace(" ", "")}
           </text>
         </g>
@@ -402,8 +403,11 @@ function TideChart({ series, nowMs, windows, sunEvents, currentPoint }) {
         <rect key={i} x={x(w.start)} y={padT} width={Math.max(1, x(w.end) - x(w.start))} height={height - padT - padB}
           fill={THEME.bite} opacity="0.14" />
       ))}
-      {sunEvents.map((s, i) => (
-        <line key={i} x1={x(s)} x2={x(s)} y1={padT} y2={height - padB} stroke={THEME.kelp} strokeWidth="1" strokeDasharray="2,3" opacity="0.5" />
+      {sunriseEvents.map((s, i) => (
+        <line key={`sr-${i}`} x1={x(s)} x2={x(s)} y1={padT} y2={height - padB} stroke="#D9A441" strokeWidth="1.5" strokeDasharray="2,3" opacity="0.8" />
+      ))}
+      {sunsetEvents.map((s, i) => (
+        <line key={`ss-${i}`} x1={x(s)} x2={x(s)} y1={padT} y2={height - padB} stroke="#C1652E" strokeWidth="1.5" strokeDasharray="2,3" opacity="0.8" />
       ))}
       <path d={pathD} fill="none" stroke={THEME.tide} strokeWidth="2.5" strokeLinejoin="round" />
       {nowMs >= tMin && nowMs <= tMax && currentPoint ? (
@@ -450,6 +454,15 @@ export default function Slackfin() {
   useEffect(() => {
     const id = setInterval(() => setNow(pacificNowPseudo()), 60000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const hasVisited = localStorage.getItem("slackfin_visited");
+    if (!hasVisited) {
+      setShowHow(true);
+      setShowAbout(true);
+      localStorage.setItem("slackfin_visited", "true");
+    }
   }, []);
 
   useEffect(() => {
@@ -522,12 +535,14 @@ export default function Slackfin() {
     return findWindows(series, 62, now, 30 * 3600000);
   }, [series, now]);
 
-  const sunEvents = useMemo(() => {
+  const sunriseEvents = useMemo(() => {
     if (!wx) return [];
-    const evts = [];
-    (wx.daily?.sunrise || []).forEach((s) => evts.push(parseWallClock(s)));
-    (wx.daily?.sunset || []).forEach((s) => evts.push(parseWallClock(s)));
-    return evts;
+    return (wx.daily?.sunrise || []).map((s) => parseWallClock(s));
+  }, [wx]);
+
+  const sunsetEvents = useMemo(() => {
+    if (!wx) return [];
+    return (wx.daily?.sunset || []).map((s) => parseWallClock(s));
   }, [wx]);
 
   const sst = useMemo(() => {
@@ -723,7 +738,7 @@ Question: ${question}`;
               />
               <h1
                 className="serif leading-tight cursor-pointer select-none"
-                style={{ fontSize: 26, color: "#042A2B" }}
+                style={{ fontSize: 30, color: "#042A2B" }}
                 onClick={() => {
                   const next = wordmarkTaps + 1;
                   setWordmarkTaps(next);
@@ -736,6 +751,9 @@ Question: ${question}`;
                 slackfin
               </h1>
             </div>
+            <p style={{ fontSize: 14, color: THEME.slackDeep, marginTop: 4, lineHeight: 1.45 }}>
+              Know before you go: tide, weather, and a bite report, in tow.
+            </p>
             <div className="flex items-center gap-1.5 mt-2" style={{ color: THEME.ink }}>
               <MapPin size={13} />
               <span className="uppercase tracking-wide" style={{ fontSize: 13 }}>Fox Island Pier · Marine Area 13</span>
@@ -772,21 +790,21 @@ Question: ${question}`;
         </div>
 
         {Object.keys(errors).length > 0 && (
-          <div className="mb-3 px-3 py-2 rounded-lg" style={{ fontSize: 12, background: "#FBE4DC", color: THEME.ink }}>
+          <div className="mb-3 px-3 py-2 rounded-lg" style={{ fontSize: 14, background: "#FBE4DC", color: THEME.ink, lineHeight: 1.45 }}>
             {Object.values(errors).join(" ")}
           </div>
         )}
 
         {/* verdict card */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 12, color: THEME.ink }}>Conditions Score</div>
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink }}>Conditions Score</div>
           <div className="flex flex-col gap-3">
             <div className="flex justify-center">
               {currentPoint ? <ScoreStamp score={currentPoint.score} /> : <Loader2 className="animate-spin" size={28} />}
             </div>
             <div className="w-full min-w-0">
               {aiLoading && !aiVerdict ? (
-                <div className="flex items-center gap-2 " style={{ fontSize: 13, color: THEME.slack }}>
+                <div className="flex items-center gap-2 " style={{ fontSize: 14, color: THEME.slackDeep }}>
                   <Loader2 className="animate-spin" size={13} /> Reading the conditions…
                 </div>
               ) : (() => {
@@ -794,7 +812,7 @@ Question: ${question}`;
                 const idx = raw.indexOf("WHY:");
                 if (idx === -1) {
                   return (
-                    <p className="serif italic leading-snug" style={{ fontSize: 15, color: THEME.ink }}>
+                    <p className="serif italic leading-normal" style={{ fontSize: 15, color: THEME.ink }}>
                       {raw}
                     </p>
                   );
@@ -803,10 +821,10 @@ Question: ${question}`;
                 const why = raw.slice(idx + 4).trim();
                 return (
                   <>
-                    <p className="serif leading-snug" style={{ fontSize: 18, fontWeight: 600, color: THEME.ink }}>
+                    <p className="serif leading-normal" style={{ fontSize: 18, fontWeight: 600, color: THEME.ink }}>
                       {verdict}
                     </p>
-                    <p className="serif italic leading-snug mt-1" style={{ fontSize: 15, color: THEME.ink }}>
+                    <p className="serif italic leading-normal mt-1" style={{ fontSize: 15, color: THEME.ink }}>
                       {why}
                     </p>
                   </>
@@ -817,12 +835,12 @@ Question: ${question}`;
           <button
             onClick={() => setShowHow((s) => !s)}
             className="flex items-center gap-1 mt-3"
-            style={{ fontSize: 11, color: THEME.kelp }}
+            style={{ fontSize: 12, color: THEME.kelp }}
           >
             <Info size={12} /> How this score works {showHow ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           </button>
           {showHow && (
-            <p className="mt-2 leading-relaxed" style={{ fontSize: 12, color: THEME.slack }}>
+            <p className="mt-2 leading-relaxed" style={{ fontSize: 14, color: THEME.slackDeep }}>
               The score weighs tide movement, dawn and dusk light, barometric pressure, wind, and moon phase.
               Outgoing tide is weighted a bit higher here, since the south end of Fox Island is known locally
               to fish best on the outgoing. It is a starting heuristic, not a guarantee. Log your catches below
@@ -834,33 +852,34 @@ Question: ${question}`;
         {/* tide chart */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="flex items-center justify-between mb-2">
-            <span className="uppercase tracking-wide" style={{ fontSize: 12, color: THEME.ink }}>
+            <span className="uppercase tracking-wide" style={{ fontSize: 13, color: THEME.ink }}>
               Tide, next 42 hours
             </span>
             {currentPoint ? (
               <span className="mono rounded-full px-2 py-0.5" style={{ fontSize: 12, background: THEME.paper, color: THEME.ink }}>Current: {currentPoint.v.toFixed(1)} ft</span>
             ) : null}
             {tide?.station ? (
-              <span className="mono" style={{ fontSize: 10, color: THEME.slack }}>NOAA {tide.station.name}</span>
+              <span className="mono" style={{ fontSize: 12, color: THEME.slackDeep }}>NOAA {tide.station.name}</span>
             ) : null}
           </div>
           {series.length ? (
-            <TideChart series={series} nowMs={now} windows={windows} sunEvents={sunEvents} currentPoint={currentPoint} />
+            <TideChart series={series} nowMs={now} windows={windows} sunriseEvents={sunriseEvents} sunsetEvents={sunsetEvents} currentPoint={currentPoint} />
           ) : (
-            <div className="h-40 flex items-center justify-center" style={{ color: THEME.slack }}>
+            <div className="h-40 flex items-center justify-center" style={{ color: THEME.slackDeep }}>
               <Loader2 className="animate-spin mr-2" size={16} /> Loading tide curve…
             </div>
           )}
-          <div className="flex items-center gap-3 mt-2 " style={{ fontSize: 10, color: THEME.slack }}>
+          <div className="flex items-center gap-3 mt-2 " style={{ fontSize: 12, color: THEME.slackDeep }}>
             <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: THEME.bite, opacity: 0.4 }} /> good window</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-0.5" style={{ background: THEME.kelp }} /> sunrise / sunset</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-0.5" style={{ background: "#D9A441" }} /> sunrise</span>
+            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-0.5" style={{ background: "#C1652E" }} /> sunset</span>
           </div>
         </div>
 
         {/* best windows */}
         {windows.length > 0 && (
           <div className="mb-4">
-            <div className="uppercase tracking-wide mb-2" style={{ fontSize: 11, color: THEME.slack }}>Best windows ahead</div>
+            <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.slackDeep }}>Best windows ahead</div>
             <div className="flex gap-2 flex-wrap">
               {windows.slice(0, 4).map((w, i) => (
                 <div key={i} className="rounded-lg px-3 py-1.5 mono"
@@ -875,8 +894,8 @@ Question: ${question}`;
 
         {/* ask panel */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 12, color: THEME.ink }}>Ask about conditions</div>
-          <p className="mb-2" style={{ fontSize: 12, color: THEME.slack }}>
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink }}>Ask about conditions</div>
+          <p className="mb-2" style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
             Ask anything about current conditions at the pier.
           </p>
           {chatMessages.length > 0 && (
@@ -886,14 +905,15 @@ Question: ${question}`;
                   style={{
                     background: m.role === "user" ? THEME.ink : THEME.paperDeep,
                     color: m.role === "user" ? THEME.white : THEME.ink,
-                    fontSize: 13,
+                    fontSize: 16,
+                    lineHeight: 1.45,
                     maxWidth: "85%",
                   }}>
                   {m.text}
                 </div>
               ))}
               {chatLoading && (
-                <div className="flex items-center gap-2" style={{ fontSize: 13, color: THEME.slack }}>
+                <div className="flex items-center gap-2" style={{ fontSize: 14, color: THEME.slackDeep }}>
                   <Loader2 className="animate-spin" size={12} /> thinking…
                 </div>
               )}
@@ -906,7 +926,7 @@ Question: ${question}`;
               onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
               placeholder="Worth fishing the evening tide?"
               className="flex-1 rounded-lg px-3 py-2 "
-              style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.paper, color: THEME.ink }}
+              style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.paper, color: THEME.ink }}
             />
             <button
               onClick={sendChat}
@@ -924,7 +944,7 @@ Question: ${question}`;
                 key={q}
                 onClick={() => setChatInput(q)}
                 className="rounded-full px-3 py-1"
-                style={{ fontSize: 11, background: THEME.paperDeep, color: THEME.ink, border: `1px solid ${THEME.line}` }}
+                style={{ fontSize: 12, background: THEME.paperDeep, color: THEME.ink, border: `1px solid ${THEME.line}` }}
               >
                 {q}
               </button>
@@ -936,7 +956,7 @@ Question: ${question}`;
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5" style={{ color: THEME.ink }}>
-              <span className="uppercase tracking-wide" style={{ fontSize: 12 }}>Community catch log</span>
+              <span className="uppercase tracking-wide" style={{ fontSize: 13 }}>Community catch log</span>
             </div>
             <button
               onClick={() => setShowLogForm((s) => !s)}
@@ -946,20 +966,23 @@ Question: ${question}`;
               {showLogForm ? <X size={12} /> : <Plus size={12} />} {showLogForm ? "Cancel" : "Log a catch"}
             </button>
           </div>
-          <p className="mb-2" style={{ fontSize: 12, color: THEME.slack }}>
+          <p className="mb-2" style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
             See what other anglers are catching at Fox Island Pier. Add your own below.
           </p>
 
           {showLogForm && (
             <div className="flex flex-col gap-2 mb-3 p-3 rounded-xl" style={{ background: THEME.paper }}>
+              <p style={{ fontSize: 12, color: THEME.slackDeep, marginBottom: 4, lineHeight: 1.45 }}>
+                Catches, including photos and first names, are visible to anyone who visits this site.
+              </p>
               <div className="flex flex-col gap-1">
                 <label style={{ fontSize: 12, color: THEME.ink }}>Your first name</label>
                 <input
                   value={form.angler}
                   onChange={(e) => setForm({ ...form, angler: e.target.value })}
-                  placeholder="Kate"
+                  placeholder="Kate, Lefty, Spike..."
                   className="rounded-lg px-3 py-2"
-                  style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                  style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.white }}
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -967,9 +990,9 @@ Question: ${question}`;
                 <input
                   value={form.species}
                   onChange={(e) => setForm({ ...form, species: e.target.value })}
-                  placeholder="Species (coho, blackmouth, cutthroat…)"
+                  placeholder="coho, blackmouth, cutthroat…"
                   className="rounded-lg px-3 py-2 "
-                  style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                  style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.white }}
                 />
               </div>
               <div className="flex gap-2">
@@ -980,7 +1003,7 @@ Question: ${question}`;
                     onChange={(e) => setForm({ ...form, length: e.target.value })}
                     placeholder="Length (in)"
                     className="w-24 rounded-lg px-3 py-2 "
-                    style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                    style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.white }}
                   />
                 </div>
                 <div className="flex flex-col gap-1 flex-1">
@@ -990,7 +1013,7 @@ Question: ${question}`;
                     onChange={(e) => setForm({ ...form, bait: e.target.value })}
                     placeholder="Bait or lure"
                     className="flex-1 rounded-lg px-3 py-2 "
-                    style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                    style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.white }}
                   />
                 </div>
               </div>
@@ -1002,11 +1025,11 @@ Question: ${question}`;
                   placeholder="Notes"
                   rows={2}
                   className="rounded-lg px-3 py-2 resize-none"
-                  style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                  style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.white }}
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="rounded-lg px-3 py-2 text-center cursor-pointer" style={{ fontSize: 13, border: `1px dashed ${THEME.line}`, background: THEME.paper, color: THEME.slack }}>
+                <label className="rounded-lg px-3 py-2 text-center cursor-pointer" style={{ fontSize: 13, border: `1px dashed ${THEME.line}`, background: THEME.paper, color: THEME.slackDeep }}>
                   {form.photoPreview ? "Change photo" : "Add a photo"}
                   <input
                     type="file"
@@ -1030,7 +1053,7 @@ Question: ${question}`;
                   <img src={form.photoPreview} alt="Catch preview" className="rounded-lg w-full object-contain" style={{ maxHeight: 160, background: THEME.paper }} />
                 )}
               </div>
-              <div style={{ fontSize: 11, color: THEME.slack }}>
+              <div style={{ fontSize: 12, color: THEME.slackDeep, lineHeight: 1.45 }}>
                 Saves today's tide, pressure, wind, and moon alongside the catch.
               </div>
               <button
@@ -1045,7 +1068,7 @@ Question: ${question}`;
           )}
 
           {catches.length === 0 ? (
-            <p style={{ fontSize: 13, color: THEME.slack }}>
+            <p style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
               No catches logged yet. Be the first to share what's biting.
             </p>
           ) : (
@@ -1057,12 +1080,12 @@ Question: ${question}`;
                       <div className="font-medium" style={{ fontSize: 14, color: THEME.ink }}>
                         {c.species}{c.length ? ` · ${c.length}"` : ""}{c.angler ? ` · ${c.angler}` : ""}
                       </div>
-                      <div style={{ fontSize: 12, color: THEME.slack }}>
+                      <div style={{ fontSize: 12, color: THEME.slackDeep }}>
                         {formatDayLabel(toPacificPseudo(c.created_at), now)} {formatTime(toPacificPseudo(c.created_at))}{c.bait ? ` · ${c.bait}` : ""}
                       </div>
-                      {c.notes && <div className="mt-1" style={{ fontSize: 14, color: THEME.ink }}>{c.notes}</div>}
+                      {c.notes && <div className="mt-1" style={{ fontSize: 14, color: THEME.ink, lineHeight: 1.45 }}>{c.notes}</div>}
                       {c.conditions && (
-                        <div className="mono mt-1" style={{ fontSize: 11, color: THEME.slack }}>
+                        <div className="mono mt-1" style={{ fontSize: 12, color: THEME.slackDeep, lineHeight: 1.45 }}>
                           {c.conditions.tideDirection} tide, {c.conditions.tideHeight}ft · {c.conditions.pressureTrend} pressure · {c.conditions.windMph}mph · {c.conditions.moon} · score {c.conditions.score}
                         </div>
                       )}
@@ -1094,8 +1117,8 @@ Question: ${question}`;
 
         {/* regs reminder */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.paperDeep, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 12, color: THEME.ink }}>Know before you go</div>
-          <ul className="leading-relaxed list-disc pl-4" style={{ fontSize: 12, color: THEME.ink }}>
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink }}>Know before you go</div>
+          <ul className="leading-relaxed list-disc pl-4" style={{ fontSize: 14, color: THEME.ink }}>
             <li>Marine Area 13 is the only Washington marine area open to salmon fishing year round, and it allows the two-pole endorsement.</li>
             <li>Single-point barbless hooks are required for salmon here.</li>
             <li>Daily limits, size limits, and species-specific rules change through the season and can shift with emergency orders.</li>
@@ -1105,7 +1128,7 @@ Question: ${question}`;
             target="_blank"
             rel="noopener noreferrer"
             className="underline inline-block mt-2"
-            style={{ fontSize: 12, color: THEME.slackDeep }}
+            style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}
           >
             Check current WDFW rules for Marine Area 13
           </a>
@@ -1115,7 +1138,7 @@ Question: ${question}`;
         <button
           onClick={() => setShowAbout((s) => !s)}
           className="w-full text-left uppercase tracking-wide flex items-center justify-between py-2"
-          style={{ fontSize: 12, color: THEME.ink }}
+          style={{ fontSize: 13, color: THEME.ink }}
         >
           About this tool {showAbout ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
@@ -1128,19 +1151,31 @@ Question: ${question}`;
               { label: "Your catch log", desc: "Private to this site, saved so you can look back on past trips." },
             ].map((row) => (
               <div key={row.label}>
-                <div style={{ fontSize: 13, color: THEME.ink, fontWeight: 500 }}>{row.label}</div>
-                <div style={{ fontSize: 13, color: THEME.slack }}>{row.desc}</div>
+                <div style={{ fontSize: 14, color: THEME.ink, fontWeight: 500 }}>{row.label}</div>
+                <div style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>{row.desc}</div>
               </div>
             ))}
+            <div>
+              <div className="font-medium" style={{ fontSize: 14, color: THEME.ink }}>Visibility</div>
+              <div style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
+                Catches, including photos and first names, are visible to anyone who visits this site.
+              </div>
+            </div>
+
+            <div>
+              <div className="font-medium" style={{ fontSize: 14, color: THEME.ink }}>Keep it fishing-related</div>
+              <div style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
+                Off-topic or inappropriate posts may be removed.
+              </div>
+            </div>
           </div>
         )}
 
-        <div className="text-center pt-6 pb-6" style={{ fontSize: 12, color: THEME.slack, borderTop: `1px solid ${THEME.line}` }}>
-          Built by{" "}
+        <div className="text-center pt-6 pb-6" style={{ fontSize: 12, color: THEME.slackDeep, borderTop: `1px solid ${THEME.line}` }}>
+          © 2026 slackfin · Built by{" "}
           <a href="mailto:katherineborgen@gmail.com" style={{ color: THEME.kelp, textDecoration: "underline" }}>
             Kate Borgen
           </a>
-          , seasoned angler + software builder
         </div>
       </div>
 
