@@ -404,10 +404,10 @@ function TideChart({ series, nowMs, windows, sunriseEvents, sunsetEvents, curren
           fill={THEME.bite} opacity="0.14" />
       ))}
       {sunriseEvents.map((s, i) => (
-        <line key={`sr-${i}`} x1={x(s)} x2={x(s)} y1={padT} y2={height - padB} stroke="#D9A441" strokeWidth="1.5" strokeDasharray="2,3" opacity="0.8" />
+        <line key={`sr-${i}`} x1={x(s)} x2={x(s)} y1={padT} y2={height - padB} stroke="#D9A441" strokeWidth="1.5" opacity="0.8" />
       ))}
       {sunsetEvents.map((s, i) => (
-        <line key={`ss-${i}`} x1={x(s)} x2={x(s)} y1={padT} y2={height - padB} stroke="#C1652E" strokeWidth="1.5" strokeDasharray="2,3" opacity="0.8" />
+        <line key={`ss-${i}`} x1={x(s)} x2={x(s)} y1={padT} y2={height - padB} stroke="#C1652E" strokeWidth="1.5" opacity="0.8" />
       ))}
       <path d={pathD} fill="none" stroke={THEME.tide} strokeWidth="2.5" strokeLinejoin="round" />
       {nowMs >= tMin && nowMs <= tMax && currentPoint ? (
@@ -751,7 +751,7 @@ Question: ${question}`;
                 slackfin
               </h1>
             </div>
-            <p style={{ fontSize: 14, color: THEME.slackDeep, marginTop: 4, lineHeight: 1.45 }}>
+            <p style={{ fontSize: 14, color: THEME.slackDeep, marginTop: 4, marginBottom: 12, lineHeight: 1.45 }}>
               Know before you go: tide, weather, and a bite report, in tow.
             </p>
             <div className="flex items-center gap-1.5 mt-2" style={{ color: THEME.ink }}>
@@ -967,7 +967,7 @@ Question: ${question}`;
             </button>
           </div>
           <p className="mb-2" style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
-            See what other anglers are catching at Fox Island Pier. Add your own below.
+            See what others are catching at Fox Island Pier. Add your own below.
           </p>
 
           {showLogForm && (
@@ -1171,7 +1171,7 @@ Question: ${question}`;
           </div>
         )}
 
-        <div className="text-center pt-6 pb-6" style={{ fontSize: 12, color: THEME.slackDeep, borderTop: `1px solid ${THEME.line}` }}>
+        <div className="text-center pt-6 pb-6" style={{ fontSize: 14, color: THEME.slackDeep, borderTop: `1px solid ${THEME.line}` }}>
           © 2026 slackfin · Built by{" "}
           <a href="mailto:katherineborgen@gmail.com" style={{ color: THEME.kelp, textDecoration: "underline" }}>
             Kate Borgen
