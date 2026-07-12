@@ -436,16 +436,39 @@ export default function Slackfin() {
 
   const [catches, setCatches] = useState([]);
   const [showLogForm, setShowLogForm] = useState(false);
-  const [form, setForm] = useState({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null });
+  const [form, setForm] = useState({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null, angler: "" });
 
   const [showAbout, setShowAbout] = useState(false);
   const [showHow, setShowHow] = useState(false);
 
   const [expandedPhoto, setExpandedPhoto] = useState(null);
 
+  const [userId, setUserId] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [wordmarkTaps, setWordmarkTaps] = useState(0);
+
   useEffect(() => {
     const id = setInterval(() => setNow(pacificNowPseudo()), 60000);
     return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        await supabase.auth.signInAnonymously();
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUserId(session?.user?.id ?? null);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUserId(session?.user?.id ?? null);
+    });
+    return () => listener.subscription.unsubscribe();
   }, []);
 
   const loadAll = useCallback(async () => {
@@ -621,18 +644,40 @@ Question: ${question}`;
       .from("catches")
       .insert([{
         species: form.species.trim(),
+        angler: form.angler.trim(),
         length: form.length.trim(),
         bait: form.bait.trim(),
         notes: form.notes.trim(),
         conditions,
         photo_url: photoUrl,
+        created_by: userId,
       }])
       .select();
 
     if (!error && data) {
       setCatches([data[0], ...catches]);
-      setForm({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null });
+      setForm({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null, angler: "" });
       setShowLogForm(false);
+    }
+  }
+
+  async function adminDeleteCatch(id, photoUrl) {
+    const passphrase = window.prompt("Admin passphrase:");
+    if (!passphrase) return;
+    const res = await fetch(
+      "https://psobrejvsfnepxgkceqx.supabase.co/functions/v1/admin-delete",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ catchId: id, photoUrl, passphrase }),
+      }
+    );
+    const data = await res.json();
+    if (data.success) {
+      setCatches(catches.filter((c) => c.id !== id));
+      setIsAdmin(true);
+    } else {
+      alert("Delete failed: " + (data.error || "unknown error"));
     }
   }
 
@@ -676,7 +721,18 @@ Question: ${question}`;
                 className="rounded-lg shrink-0"
                 style={{ width: 34, height: 34 }}
               />
-              <h1 className="serif leading-tight" style={{ fontSize: 26, color: "#042A2B" }}>
+              <h1
+                className="serif leading-tight cursor-pointer select-none"
+                style={{ fontSize: 26, color: "#042A2B" }}
+                onClick={() => {
+                  const next = wordmarkTaps + 1;
+                  setWordmarkTaps(next);
+                  if (next >= 5) {
+                    setIsAdmin((prev) => !prev);
+                    setWordmarkTaps(0);
+                  }
+                }}
+              >
                 slackfin
               </h1>
             </div>
@@ -782,7 +838,7 @@ Question: ${question}`;
               Tide, next 42 hours
             </span>
             {currentPoint ? (
-              <span className="mono rounded-full px-2 py-0.5" style={{ fontSize: 12, background: THEME.paper, color: THEME.tide }}>Current: {currentPoint.v.toFixed(1)} ft</span>
+              <span className="mono rounded-full px-2 py-0.5" style={{ fontSize: 12, background: THEME.paper, color: THEME.ink }}>Current: {currentPoint.v.toFixed(1)} ft</span>
             ) : null}
             {tide?.station ? (
               <span className="mono" style={{ fontSize: 10, color: THEME.slack }}>NOAA {tide.station.name}</span>
@@ -820,6 +876,9 @@ Question: ${question}`;
         {/* ask panel */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="uppercase tracking-wide mb-2" style={{ fontSize: 12, color: THEME.ink }}>Ask about conditions</div>
+          <p className="mb-2" style={{ fontSize: 12, color: THEME.slack }}>
+            Ask anything about current conditions at the pier.
+          </p>
           {chatMessages.length > 0 && (
             <div className="flex flex-col gap-2 mb-3 max-h-64 overflow-y-auto">
               {chatMessages.map((m, i) => (
@@ -877,7 +936,7 @@ Question: ${question}`;
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5" style={{ color: THEME.ink }}>
-              <span className="uppercase tracking-wide" style={{ fontSize: 12 }}>Your catch log</span>
+              <span className="uppercase tracking-wide" style={{ fontSize: 12 }}>Community catch log</span>
             </div>
             <button
               onClick={() => setShowLogForm((s) => !s)}
@@ -887,40 +946,65 @@ Question: ${question}`;
               {showLogForm ? <X size={12} /> : <Plus size={12} />} {showLogForm ? "Cancel" : "Log a catch"}
             </button>
           </div>
+          <p className="mb-2" style={{ fontSize: 12, color: THEME.slack }}>
+            See what other anglers are catching at Fox Island Pier. Add your own below.
+          </p>
 
           {showLogForm && (
             <div className="flex flex-col gap-2 mb-3 p-3 rounded-xl" style={{ background: THEME.paper }}>
-              <input
-                value={form.species}
-                onChange={(e) => setForm({ ...form, species: e.target.value })}
-                placeholder="Species (coho, blackmouth, cutthroat…)"
-                className="rounded-lg px-3 py-2 "
-                style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
-              />
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-1">
+                <label style={{ fontSize: 12, color: THEME.ink }}>Your first name</label>
                 <input
-                  value={form.length}
-                  onChange={(e) => setForm({ ...form, length: e.target.value })}
-                  placeholder="Length (in)"
-                  className="w-24 rounded-lg px-3 py-2 "
-                  style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
-                />
-                <input
-                  value={form.bait}
-                  onChange={(e) => setForm({ ...form, bait: e.target.value })}
-                  placeholder="Bait or lure"
-                  className="flex-1 rounded-lg px-3 py-2 "
+                  value={form.angler}
+                  onChange={(e) => setForm({ ...form, angler: e.target.value })}
+                  placeholder="Kate"
+                  className="rounded-lg px-3 py-2"
                   style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
                 />
               </div>
-              <textarea
-                value={form.notes}
-                onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                placeholder="Notes"
-                rows={2}
-                className="rounded-lg px-3 py-2 resize-none"
-                style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
-              />
+              <div className="flex flex-col gap-1">
+                <label style={{ fontSize: 12, color: THEME.ink }}>Species</label>
+                <input
+                  value={form.species}
+                  onChange={(e) => setForm({ ...form, species: e.target.value })}
+                  placeholder="Species (coho, blackmouth, cutthroat…)"
+                  className="rounded-lg px-3 py-2 "
+                  style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex flex-col gap-1">
+                  <label style={{ fontSize: 12, color: THEME.ink }}>Length (in)</label>
+                  <input
+                    value={form.length}
+                    onChange={(e) => setForm({ ...form, length: e.target.value })}
+                    placeholder="Length (in)"
+                    className="w-24 rounded-lg px-3 py-2 "
+                    style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                  />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <label style={{ fontSize: 12, color: THEME.ink }}>Bait or lure</label>
+                  <input
+                    value={form.bait}
+                    onChange={(e) => setForm({ ...form, bait: e.target.value })}
+                    placeholder="Bait or lure"
+                    className="flex-1 rounded-lg px-3 py-2 "
+                    style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label style={{ fontSize: 12, color: THEME.ink }}>Notes</label>
+                <textarea
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  placeholder="Notes"
+                  rows={2}
+                  className="rounded-lg px-3 py-2 resize-none"
+                  style={{ fontSize: 13, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                />
+              </div>
               <div className="flex flex-col gap-2">
                 <label className="rounded-lg px-3 py-2 text-center cursor-pointer" style={{ fontSize: 13, border: `1px dashed ${THEME.line}`, background: THEME.paper, color: THEME.slack }}>
                   {form.photoPreview ? "Change photo" : "Add a photo"}
@@ -962,7 +1046,7 @@ Question: ${question}`;
 
           {catches.length === 0 ? (
             <p style={{ fontSize: 13, color: THEME.slack }}>
-              No catches logged yet. Every entry saves the conditions at the time, so patterns show up over a season.
+              No catches logged yet. Be the first to share what's biting.
             </p>
           ) : (
             <div className="flex flex-col gap-2">
@@ -971,7 +1055,7 @@ Question: ${question}`;
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="font-medium" style={{ fontSize: 14, color: THEME.ink }}>
-                        {c.species}{c.length ? ` · ${c.length}"` : ""}
+                        {c.species}{c.length ? ` · ${c.length}"` : ""}{c.angler ? ` · ${c.angler}` : ""}
                       </div>
                       <div style={{ fontSize: 12, color: THEME.slack }}>
                         {formatDayLabel(toPacificPseudo(c.created_at), now)} {formatTime(toPacificPseudo(c.created_at))}{c.bait ? ` · ${c.bait}` : ""}
@@ -992,9 +1076,15 @@ Question: ${question}`;
                         />
                       )}
                     </div>
-                    <button onClick={() => deleteCatch(c.id, c.photo_url)} aria-label="Delete catch" className="shrink-0">
-                      <Trash2 size={14} style={{ color: THEME.slack }} />
-                    </button>
+                    {(userId && c.created_by === userId) ? (
+                      <button onClick={() => deleteCatch(c.id, c.photo_url)} aria-label="Delete catch" className="shrink-0">
+                        <Trash2 size={14} style={{ color: THEME.slack }} />
+                      </button>
+                    ) : isAdmin ? (
+                      <button onClick={() => adminDeleteCatch(c.id, c.photo_url)} aria-label="Admin delete catch" className="shrink-0">
+                        <Trash2 size={14} style={{ color: THEME.bite }} />
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ))}
