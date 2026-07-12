@@ -457,6 +457,9 @@ export default function Slackfin() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [wordmarkTaps, setWordmarkTaps] = useState(0);
 
+  const [locationRequest, setLocationRequest] = useState({ name: "", note: "" });
+  const [locationRequestSent, setLocationRequestSent] = useState(false);
+
   useEffect(() => {
     const id = setInterval(() => setNow(pacificNowPseudo()), 60000);
     return () => clearInterval(id);
@@ -711,6 +714,18 @@ Question: ${question}`;
     const { error } = await supabase.from("catches").delete().eq("id", id);
     if (!error) {
       setCatches(catches.filter((c) => c.id !== id));
+    }
+  }
+
+  async function submitLocationRequest() {
+    if (!locationRequest.name.trim()) return;
+    const { error } = await supabase.from("location_requests").insert([{
+      location_name: locationRequest.name.trim(),
+      note: locationRequest.note.trim(),
+    }]);
+    if (!error) {
+      setLocationRequestSent(true);
+      setLocationRequest({ name: "", note: "" });
     }
   }
 
@@ -1151,6 +1166,41 @@ Question: ${question}`;
           >
             Check current WDFW rules for Marine Area 13
           </a>
+        </div>
+
+        <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
+          <div className="uppercase tracking-wide mb-1" style={{ fontSize: 13, color: THEME.ink, fontWeight: 600 }}>Want another location?</div>
+          <p style={{ fontSize: 13, color: THEME.slackDeep, marginBottom: 8 }}>
+            slackfin currently works best for saltwater piers in Washington State near a NOAA tide station. Let us know what spot you'd want to see next.
+          </p>
+          {locationRequestSent ? (
+            <p style={{ fontSize: 13, color: THEME.kelp }}>Thanks! Your request has been noted.</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <input
+                value={locationRequest.name}
+                onChange={(e) => setLocationRequest({ ...locationRequest, name: e.target.value })}
+                placeholder="Pier or location name"
+                className="rounded-lg px-3 py-2"
+                style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.paper }}
+              />
+              <input
+                value={locationRequest.note}
+                onChange={(e) => setLocationRequest({ ...locationRequest, note: e.target.value })}
+                placeholder="Anything else? (optional)"
+                className="rounded-lg px-3 py-2"
+                style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.paper }}
+              />
+              <button
+                onClick={submitLocationRequest}
+                disabled={!locationRequest.name.trim()}
+                className="rounded-lg py-2 disabled:opacity-40"
+                style={{ fontSize: 13, background: THEME.kelp, color: THEME.white }}
+              >
+                Send request
+              </button>
+            </div>
+          )}
         </div>
 
         {/* about / portfolio footer */}
