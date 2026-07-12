@@ -86,6 +86,12 @@ function toPacificPseudo(isoString) {
   return Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day), hour, Number(map.minute), Number(map.second));
 }
 
+function toDatetimeLocalValue(pseudoMs) {
+  const d = new Date(pseudoMs);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
 function toNOAADateStr(pseudoMs) {
   const d = new Date(pseudoMs);
   const y = d.getUTCFullYear();
@@ -440,7 +446,7 @@ export default function Slackfin() {
 
   const [catches, setCatches] = useState([]);
   const [showLogForm, setShowLogForm] = useState(false);
-  const [form, setForm] = useState({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null, angler: "" });
+  const [form, setForm] = useState({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null, angler: "", caughtAt: pacificNowPseudo() });
 
   const [showAbout, setShowAbout] = useState(false);
   const [showHow, setShowHow] = useState(false);
@@ -666,12 +672,13 @@ Question: ${question}`;
         conditions,
         photo_url: photoUrl,
         created_by: userId,
+        caught_at: new Date(form.caughtAt).toISOString(),
       }])
       .select();
 
     if (!error && data) {
       setCatches([data[0], ...catches]);
-      setForm({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null, angler: "" });
+      setForm({ species: "", length: "", bait: "", notes: "", photoFile: null, photoPreview: null, angler: "", caughtAt: pacificNowPseudo() });
       setShowLogForm(false);
     }
   }
@@ -986,6 +993,16 @@ Question: ${question}`;
                 />
               </div>
               <div className="flex flex-col gap-1">
+                <label style={{ fontSize: 12, color: THEME.ink }}>When did you catch it? (estimate)</label>
+                <input
+                  type="datetime-local"
+                  value={toDatetimeLocalValue(form.caughtAt)}
+                  onChange={(e) => setForm({ ...form, caughtAt: parseWallClock(e.target.value) })}
+                  className="rounded-lg px-3 py-2"
+                  style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.white }}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
                 <label style={{ fontSize: 12, color: THEME.ink }}>Species</label>
                 <input
                   value={form.species}
@@ -1081,7 +1098,7 @@ Question: ${question}`;
                         {c.species}{c.length ? ` · ${c.length}"` : ""}{c.angler ? ` · ${c.angler}` : ""}
                       </div>
                       <div style={{ fontSize: 12, color: THEME.slackDeep }}>
-                        {formatDayLabel(toPacificPseudo(c.created_at), now)} {formatTime(toPacificPseudo(c.created_at))}{c.bait ? ` · ${c.bait}` : ""}
+                        {formatDayLabel(c.caught_at ? new Date(c.caught_at).getTime() : toPacificPseudo(c.created_at), now)} {formatTime(c.caught_at ? new Date(c.caught_at).getTime() : toPacificPseudo(c.created_at))}{c.bait ? ` · ${c.bait}` : ""}
                       </div>
                       {c.notes && <div className="mt-1" style={{ fontSize: 14, color: THEME.ink, lineHeight: 1.45 }}>{c.notes}</div>}
                       {c.conditions && (
@@ -1119,9 +1136,11 @@ Question: ${question}`;
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.paperDeep, border: `1px solid ${THEME.line}` }}>
           <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink }}>Know before you go</div>
           <ul className="leading-relaxed list-disc pl-4" style={{ fontSize: 14, color: THEME.ink }}>
+            <li>Open 7 a.m. to dusk.</li>
             <li>Marine Area 13 is the only Washington marine area open to salmon fishing year round, and it allows the two-pole endorsement.</li>
             <li>Single-point barbless hooks are required for salmon here.</li>
             <li>Daily limits, size limits, and species-specific rules change through the season and can shift with emergency orders.</li>
+            <li>Fox Island Pier sits near a salmon migration choke-point in the Tacoma Narrows, with coho typically peaking in September and October.</li>
           </ul>
           <a
             href="https://wdfw.wa.gov/fishing/locations/marine-areas/south-puget-sound"
