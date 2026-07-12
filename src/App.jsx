@@ -331,9 +331,9 @@ function Chip({ icon: Icon, label, value, sub }) {
     >
       <div className="flex items-center gap-1" style={{ color: THEME.slack }}>
         {Icon ? <Icon size={12} strokeWidth={2} /> : null}
-        <span className="uppercase tracking-wide" style={{ fontSize: 10 }}>{label}</span>
+        <span className="uppercase tracking-wide" style={{ fontSize: 11 }}>{label}</span>
       </div>
-      <div className="mono leading-none" style={{ fontSize: 16, color: THEME.ink }}>{value}</div>
+      <div className="mono leading-none" style={{ fontSize: 18, color: THEME.ink }}>{value}</div>
       <div style={{ fontSize: 10, color: THEME.slack, minHeight: 12 }}>{sub || "\u00A0"}</div>
     </div>
   );
@@ -345,10 +345,7 @@ function ScoreStamp({ score }) {
   return (
     <div
       className="flex flex-col items-center justify-center rounded-full shrink-0"
-      style={{
-        width: 84, height: 84, border: `3px solid ${color}`, color,
-        transform: "rotate(-6deg)",
-      }}
+      style={{ width: 100, height: 100, border: `3px solid ${color}`, color }}
     >
       <div className="mono text-2xl font-semibold leading-none">
         {score}<span style={{ fontSize: 12, fontWeight: 400, color: THEME.slack }}>/100</span>
@@ -556,7 +553,11 @@ Facts:
 - Best predicted window in next 24 to 30 hours: ${w ? `${formatTime(w.start)} to ${formatTime(w.end)} (score ${w.avg}/100)` : "no strong window found"}
 - Local note: the south end of Fox Island is known to fish best on the outgoing tide
 
-Give your honest read of whether now, or the upcoming window, looks worth fishing, and why, in your own words.`;
+Give your honest read of whether now, or the upcoming window, looks worth fishing, and why, in your own words.
+
+Respond in exactly this format with no other text:
+VERDICT: [one short punchy sentence, max 12 words, giving your bottom-line take]
+WHY: [2-3 sentences of supporting reasoning, casual and direct, no em dashes or semicolons]`;
     askClaude(prompt)
       .then((text) => setAiVerdict(text || localVerdict()))
       .catch(() => setAiVerdict(localVerdict()))
@@ -722,19 +723,39 @@ Question: ${question}`;
 
         {/* verdict card */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 11, color: THEME.ink }}>Conditions Score</div>
-          <div className="flex gap-3 items-center">
-            {currentPoint ? <ScoreStamp score={currentPoint.score} /> : <Loader2 className="animate-spin" size={28} />}
-            <div className="flex-1 min-w-0">
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 12, color: THEME.ink }}>Conditions Score</div>
+          <div className="flex flex-col gap-3">
+            <div className="flex justify-center">
+              {currentPoint ? <ScoreStamp score={currentPoint.score} /> : <Loader2 className="animate-spin" size={28} />}
+            </div>
+            <div className="w-full min-w-0">
               {aiLoading && !aiVerdict ? (
                 <div className="flex items-center gap-2 " style={{ fontSize: 13, color: THEME.slack }}>
                   <Loader2 className="animate-spin" size={13} /> Reading the conditions…
                 </div>
-              ) : (
-                <p className="serif italic leading-snug" style={{ fontSize: 15, color: THEME.ink }}>
-                  {aiVerdict || localVerdict()}
-                </p>
-              )}
+              ) : (() => {
+                const raw = aiVerdict || localVerdict();
+                const idx = raw.indexOf("WHY:");
+                if (idx === -1) {
+                  return (
+                    <p className="serif italic leading-snug" style={{ fontSize: 15, color: THEME.ink }}>
+                      {raw}
+                    </p>
+                  );
+                }
+                const verdict = raw.slice(0, idx).replace(/^\s*VERDICT:\s*/, "").trim();
+                const why = raw.slice(idx + 4).trim();
+                return (
+                  <>
+                    <p className="serif leading-snug" style={{ fontSize: 18, fontWeight: 600, color: THEME.ink }}>
+                      {verdict}
+                    </p>
+                    <p className="serif italic leading-snug mt-1" style={{ fontSize: 15, color: THEME.ink }}>
+                      {why}
+                    </p>
+                  </>
+                );
+              })()}
             </div>
           </div>
           <button
@@ -757,11 +778,11 @@ Question: ${question}`;
         {/* tide chart */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="flex items-center justify-between mb-2">
-            <span className="uppercase tracking-wide" style={{ fontSize: 11, color: THEME.ink }}>
+            <span className="uppercase tracking-wide" style={{ fontSize: 12, color: THEME.ink }}>
               Tide, next 42 hours
             </span>
             {currentPoint ? (
-              <span className="mono" style={{ fontSize: 10, color: THEME.slack }}>Current: {currentPoint.v.toFixed(1)} ft</span>
+              <span className="mono rounded-full px-2 py-0.5" style={{ fontSize: 12, background: THEME.paper, color: THEME.tide }}>Current: {currentPoint.v.toFixed(1)} ft</span>
             ) : null}
             {tide?.station ? (
               <span className="mono" style={{ fontSize: 10, color: THEME.slack }}>NOAA {tide.station.name}</span>
@@ -798,7 +819,7 @@ Question: ${question}`;
 
         {/* ask panel */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 11, color: THEME.ink }}>Ask about conditions</div>
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 12, color: THEME.ink }}>Ask about conditions</div>
           {chatMessages.length > 0 && (
             <div className="flex flex-col gap-2 mb-3 max-h-64 overflow-y-auto">
               {chatMessages.map((m, i) => (
@@ -856,7 +877,7 @@ Question: ${question}`;
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5" style={{ color: THEME.ink }}>
-              <span className="uppercase tracking-wide" style={{ fontSize: 11 }}>Your catch log</span>
+              <span className="uppercase tracking-wide" style={{ fontSize: 12 }}>Your catch log</span>
             </div>
             <button
               onClick={() => setShowLogForm((s) => !s)}
@@ -952,12 +973,12 @@ Question: ${question}`;
                       <div className="font-medium" style={{ fontSize: 14, color: THEME.ink }}>
                         {c.species}{c.length ? ` · ${c.length}"` : ""}
                       </div>
-                      <div style={{ fontSize: 11, color: THEME.slack }}>
+                      <div style={{ fontSize: 12, color: THEME.slack }}>
                         {formatDayLabel(toPacificPseudo(c.created_at), now)} {formatTime(toPacificPseudo(c.created_at))}{c.bait ? ` · ${c.bait}` : ""}
                       </div>
-                      {c.notes && <div className="mt-1" style={{ fontSize: 12, color: THEME.ink }}>{c.notes}</div>}
+                      {c.notes && <div className="mt-1" style={{ fontSize: 14, color: THEME.ink }}>{c.notes}</div>}
                       {c.conditions && (
-                        <div className="mono mt-1" style={{ fontSize: 10, color: THEME.slack }}>
+                        <div className="mono mt-1" style={{ fontSize: 11, color: THEME.slack }}>
                           {c.conditions.tideDirection} tide, {c.conditions.tideHeight}ft · {c.conditions.pressureTrend} pressure · {c.conditions.windMph}mph · {c.conditions.moon} · score {c.conditions.score}
                         </div>
                       )}
@@ -983,7 +1004,7 @@ Question: ${question}`;
 
         {/* regs reminder */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.paperDeep, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 11, color: THEME.ink }}>Know before you go</div>
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 12, color: THEME.ink }}>Know before you go</div>
           <ul className="leading-relaxed list-disc pl-4" style={{ fontSize: 12, color: THEME.ink }}>
             <li>Marine Area 13 is the only Washington marine area open to salmon fishing year round, and it allows the two-pole endorsement.</li>
             <li>Single-point barbless hooks are required for salmon here.</li>
@@ -1004,19 +1025,33 @@ Question: ${question}`;
         <button
           onClick={() => setShowAbout((s) => !s)}
           className="w-full text-left uppercase tracking-wide flex items-center justify-between py-2"
-          style={{ fontSize: 11, color: THEME.ink }}
+          style={{ fontSize: 12, color: THEME.ink }}
         >
           About this tool {showAbout ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
         {showAbout && (
-          <p className="leading-relaxed pb-4" style={{ fontSize: 12, color: THEME.slack }}>
-            Built for the Fox Island Fishing Pier on Fox Island, WA. Tide data comes from NOAA, the government's
-            tide agency. Weather and water temperature come from Open-Meteo, a weather data service. The written
-            summary at the top is generated by Claude, an AI assistant, based on the same numbers shown above. The
-            score is a starting point based on general fishing guidance for this spot, not a guarantee you'll catch
-            anything. Your catch log is private and saved so you can look back on past trips.
-          </p>
+          <div className="flex flex-col gap-2 pb-4">
+            {[
+              { label: "Data sources", desc: "Tide from NOAA, weather and water temperature from Open-Meteo." },
+              { label: "AI summary", desc: "The written read is generated by Claude based on the same numbers shown above." },
+              { label: "Scoring", desc: "A starting point from general fishing guidance for this spot, not a guarantee." },
+              { label: "Your catch log", desc: "Private to this site, saved so you can look back on past trips." },
+            ].map((row) => (
+              <div key={row.label}>
+                <div style={{ fontSize: 13, color: THEME.ink, fontWeight: 500 }}>{row.label}</div>
+                <div style={{ fontSize: 13, color: THEME.slack }}>{row.desc}</div>
+              </div>
+            ))}
+          </div>
         )}
+
+        <div className="text-center pt-6 pb-6" style={{ fontSize: 12, color: THEME.slack, borderTop: `1px solid ${THEME.line}` }}>
+          Built by{" "}
+          <a href="mailto:katherineborgen@gmail.com" style={{ color: THEME.kelp, textDecoration: "underline" }}>
+            Kate Borgen
+          </a>
+          , seasoned angler + software builder
+        </div>
       </div>
 
       {expandedPhoto && (
