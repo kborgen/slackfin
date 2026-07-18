@@ -357,19 +357,33 @@ function Chip({ icon: Icon, label, value, sub }) {
   );
 }
 
-function ScoreStamp({ score }) {
-  const ringColor = score >= 70 ? THEME.bite : score >= 45 ? THEME.kelp : THEME.slack;
-  const textColor = score >= 70 ? THEME.bite : score >= 45 ? THEME.kelp : THEME.slackDeep;
+function FishRating({ score }) {
+  // Same 3-tier bands used elsewhere in the app (GOOD/FAIR/SLOW at 70/45),
+  // so the fish count never implies more precision than the heuristic has.
+  const color = score >= 70 ? THEME.bite : score >= 45 ? THEME.kelp : THEME.slack;
   const label = score >= 70 ? "GOOD" : score >= 45 ? "FAIR" : "SLOW";
+  const filled = Math.max(1, Math.min(5, Math.round(score / 20)));
+
   return (
-    <div
-      className="flex flex-col items-center justify-center rounded-full shrink-0"
-      style={{ width: 100, height: 100, border: `3px solid ${ringColor}`, color: textColor }}
-    >
-      <div className="mono text-2xl font-semibold leading-none">
-        {score}<span style={{ fontSize: 12, fontWeight: 400, color: THEME.slackDeep }}>/100</span>
+    <div className="flex flex-col items-center gap-1 shrink-0" style={{ width: 84 }}>
+      <div
+        role="img"
+        aria-label={`${filled} of 5 fish, ${label.toLowerCase()} conditions, score ${score} of 100`}
+        className="flex items-center gap-0.5"
+      >
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Fish
+            key={i}
+            size={16}
+            strokeWidth={2}
+            aria-hidden="true"
+            style={{ color: i < filled ? color : THEME.line }}
+            fill={i < filled ? color : "none"}
+          />
+        ))}
       </div>
-      <div className="tracking-widest mt-1" style={{ fontSize: 12 }}>{label}</div>
+      <div className="mono leading-none" style={{ fontSize: 15, color }}>{score}</div>
+      <div className="tracking-widest" style={{ fontSize: 10, color }}>{label}</div>
     </div>
   );
 }
@@ -848,7 +862,7 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
           <div className="flex flex-col gap-3">
             <div className="flex justify-center">
               {currentPoint ? (
-                <ScoreStamp score={currentPoint.score} />
+                <FishRating score={currentPoint.score} />
               ) : errors.tide ? (
                 <p className="text-center" style={{ fontSize: 14, color: THEME.bite, lineHeight: 1.45 }}>
                   NOAA's tide data is currently down. Please check back soon.
