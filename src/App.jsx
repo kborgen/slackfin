@@ -796,9 +796,12 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
             <p style={{ fontSize: 14, color: THEME.slackDeep, marginTop: 4, marginBottom: 12, lineHeight: 1.45 }}>
               Know before you go: tide, weather, and a bite report, in tow.
             </p>
-            <div className="flex items-center gap-1.5 mt-2" style={{ color: THEME.ink }}>
-              <MapPin size={13} />
-              <span className="uppercase tracking-wide" style={{ fontSize: 13 }}>Fox Island Pier · Marine Area 13</span>
+            <div className="flex items-center gap-1.5 mt-2">
+              <MapPin size={15} style={{ color: THEME.kelp }} />
+              <span style={{ fontSize: 15, fontWeight: 600 }}>
+                <span className="uppercase tracking-wide" style={{ color: THEME.kelp }}>Fox Island Pier</span>
+                <span style={{ color: THEME.slackDeep }}> · Marine Area 13</span>
+              </span>
             </div>
           </div>
           <button
@@ -832,9 +835,11 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
               <Chip icon={Sunset} label="Sunset" value={formatTime(todaySun.sunset)} />
             </>
           ) : null}
-          {nextHigh ? (
-            <Chip icon={Waves} label={nextHigh.type === "H" ? "Next high" : "Next low"} value={formatTime(nextHigh.t)} sub={`${nextHigh.v.toFixed(1)} ft`} />
-          ) : null}
+          <Chip icon={Waves}
+            label={nextHigh ? (nextHigh.type === "H" ? "Next high" : "Next low") : "Next tide"}
+            value={nextHigh ? formatTime(nextHigh.t) : "…"}
+            sub={nextHigh ? `${nextHigh.v.toFixed(1)} ft` : ""} />
+
         </div>
 
         {/* verdict card */}
