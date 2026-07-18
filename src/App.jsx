@@ -461,6 +461,7 @@ export default function Slackfin() {
   const [marine, setMarine] = useState(null);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(true);
+  const [lastAttempt, setLastAttempt] = useState(null);
 
   const [aiVerdict, setAiVerdict] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -537,6 +538,7 @@ export default function Slackfin() {
     else nextErrors.marine = "Water temperature unavailable right now.";
 
     setErrors(nextErrors);
+    setLastAttempt(pacificNowPseudo());
     setLoading(false);
   }, []);
 
@@ -561,6 +563,24 @@ export default function Slackfin() {
     if (!series.length) return null;
     return series.reduce((a, b) => (Math.abs(b.t - now) < Math.abs(a.t - now) ? b : a));
   }, [series, now]);
+
+  // Wind and pressure come from Open-Meteo, not NOAA, so read them straight
+  // from the weather response — a NOAA tide outage must not blank these chips.
+  const wxNow = useMemo(() => {
+    if (!wx?.hourly?.time?.length) return null;
+    const times = wx.hourly.time.map(parseWallClock);
+    let bestI = 0, bestDiff = Infinity;
+    times.forEach((t, i) => {
+      const d = Math.abs(t - now);
+      if (d < bestDiff) { bestDiff = d; bestI = i; }
+    });
+    const pressureNow = wx.hourly.pressure_msl?.[bestI] ?? null;
+    const idxPrev = Math.max(0, bestI - 3);
+    const pressureDelta = pressureNow != null
+      ? pressureNow - wx.hourly.pressure_msl[idxPrev]
+      : 0;
+    return { windSpeed: wx.hourly.wind_speed_10m?.[bestI] ?? null, pressureNow, pressureDelta };
+  }, [wx, now]);
 
   const windows = useMemo(() => {
     if (!series.length) return [];
@@ -829,19 +849,34 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
         </div>
 
         {Object.keys(errors).length > 0 && (
-          <div className="mb-3 px-3 py-2 rounded-lg" style={{ fontSize: 14, background: "#FBE4DC", color: THEME.bite, lineHeight: 1.45 }}>
+          <div
+            className="mb-3 px-3 py-2 rounded-lg"
+            style={{ fontSize: 14, background: "#FBF3D3", border: `1px solid #E7D79E`, color: THEME.ink, lineHeight: 1.45 }}
+          >
             {Object.values(errors).join(" ")}
+            {lastAttempt ? <span style={{ color: THEME.slack }}> Last checked at {formatTime(lastAttempt)}.</span> : null}
+            {" "}
+            <button
+              onClick={loadAll}
+              className="underline underline-offset-2"
+              style={{ fontSize: 14, color: THEME.tide, fontWeight: 600 }}
+            >
+              Retry
+            </button>
           </div>
         )}
 
         {/* live conditions strip */}
         <div className="grid grid-cols-4 gap-2 mb-4">
-          <Chip icon={Waves} label="Tide" value={currentPoint ? `${currentPoint.v.toFixed(1)} ft` : "…"}
+          <Chip icon={Waves} label="Tide"
+            value={currentPoint ? `${currentPoint.v.toFixed(1)} ft` : errors.tide ? "—" : "…"}
             sub={currentPoint ? (currentPoint.rate < 0 ? "outgoing" : "incoming") : ""} />
           <Chip icon={Thermometer} label="Water" value={sst != null ? `${sst.toFixed(0)}°F` : "n/a"} sub={sst != null ? "NOAA Tacoma" : "unavailable"} />
-          <Chip icon={Wind} label="Wind" value={currentPoint ? `${Math.round(currentPoint.windSpeed)} mph` : "…"} />
-          <Chip icon={Gauge} label="Pressure" value={currentPoint ? `${Math.round(currentPoint.pressureNow)} hPa` : "…"}
-            sub={currentPoint ? (currentPoint.pressureDelta <= -1 ? "falling" : currentPoint.pressureDelta >= 2 ? "rising" : "steady") : ""} />
+          <Chip icon={Wind} label="Wind"
+            value={wxNow?.windSpeed != null ? `${Math.round(wxNow.windSpeed)} mph` : errors.wx ? "—" : "…"} />
+          <Chip icon={Gauge} label="Pressure"
+            value={wxNow?.pressureNow != null ? `${Math.round(wxNow.pressureNow)} hPa` : errors.wx ? "—" : "…"}
+            sub={wxNow?.pressureNow != null ? (wxNow.pressureDelta <= -1 ? "falling" : wxNow.pressureDelta >= 2 ? "rising" : "steady") : ""} />
           <Chip icon={Moon} label="Moon" value={moon.emoji} sub={moon.name} />
           {todaySun ? (
             <>
@@ -851,7 +886,7 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
           ) : null}
           <Chip icon={Waves}
             label={nextHigh ? (nextHigh.type === "H" ? "Next high" : "Next low") : "Next tide"}
-            value={nextHigh ? formatTime(nextHigh.t) : "…"}
+            value={nextHigh ? formatTime(nextHigh.t) : errors.tide ? "—" : "…"}
             sub={nextHigh ? `${nextHigh.v.toFixed(1)} ft` : ""} />
 
         </div>
@@ -864,8 +899,8 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
               {currentPoint ? (
                 <FishRating score={currentPoint.score} />
               ) : errors.tide ? (
-                <p className="text-center" style={{ fontSize: 14, color: THEME.bite, lineHeight: 1.45 }}>
-                  NOAA's tide data is currently down. Please check back soon.
+                <p className="text-center" style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
+                  Can't score conditions without tide data. Wind, pressure, and water temp above are still current.
                 </p>
               ) : (
                 <Loader2 className="animate-spin" size={28} />
@@ -934,19 +969,21 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
           {series.length ? (
             <TideChart series={series} nowMs={now} windows={windows} sunriseEvents={sunriseEvents} sunsetEvents={sunsetEvents} currentPoint={currentPoint} />
           ) : errors.tide ? (
-            <div className="h-40 flex items-center justify-center text-center px-4" style={{ fontSize: 14, color: THEME.bite, lineHeight: 1.45 }}>
-              NOAA's tide data is currently down. Please check back soon.
+            <div className="py-2" style={{ fontSize: 13, color: THEME.slackDeep }}>
+              Unavailable{lastAttempt ? ` · last checked ${formatTime(lastAttempt)}` : ""}
             </div>
           ) : (
             <div className="h-40 flex items-center justify-center" style={{ color: THEME.slackDeep }}>
               <Loader2 className="animate-spin mr-2" size={16} /> Loading tide curve…
             </div>
           )}
-          <div className="flex items-center gap-3 mt-2 " style={{ fontSize: 12, color: THEME.slackDeep }}>
-            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: THEME.bite, opacity: 0.4 }} /> good window</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-0.5" style={{ background: "#D9A441" }} /> sunrise</span>
-            <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-0.5" style={{ background: "#C1652E" }} /> sunset</span>
-          </div>
+          {series.length ? (
+            <div className="flex items-center gap-3 mt-2 " style={{ fontSize: 12, color: THEME.slackDeep }}>
+              <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: THEME.bite, opacity: 0.4 }} /> good window</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-0.5" style={{ background: "#D9A441" }} /> sunrise</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-0.5" style={{ background: "#C1652E" }} /> sunset</span>
+            </div>
+          ) : null}
         </div>
 
         {/* best windows */}
