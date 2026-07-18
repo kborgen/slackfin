@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Fish, Wind, Moon, Waves, Gauge, Sunrise, Sunset, Thermometer, Info, Loader2,
-  Send, ChevronDown, ChevronUp, Plus, Trash2, X, MapPin, RefreshCw
+  ChevronDown, ChevronUp, Plus, Trash2, X, MapPin, RefreshCw
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -11,8 +11,8 @@ import { supabase } from "./supabaseClient";
    Marine Area 13, South Puget Sound.
 
    Data sources:
-   - NOAA CO-OPS (tide predictions)
-   - Open-Meteo (weather + marine)
+   - NOAA CO-OPS (tide predictions + observed water temperature)
+   - Open-Meteo (weather)
    - Claude (plain-language read of conditions)
 
    Everything lives in the browser. Catch log is saved with the
@@ -20,9 +20,14 @@ import { supabase } from "./supabaseClient";
    sticks around between visits.
 ------------------------------------------------------------------ */
 
+// Tide predictions need a NOAA Reference (harmonic) station to get the 6-minute
+// curve the chart draws. Tacoma is the nearest one to Fox Island (~7 mi) and
+// also serves observed water temperature; Seattle is the reliable backup. The
+// nearer stations on Hale Passage are subordinate stations that only publish
+// high/low offsets, not the continuous curve, so they can't be primaries here.
 const STATIONS = {
-  gigHarbor: { id: "9446369", name: "Gig Harbor" },
-  tacoma: { id: "9446484", name: "Tacoma" },
+  primary: { id: "9446484", name: "Tacoma" },
+  fallback: { id: "9447130", name: "Seattle" },
 };
 
 const SITE = { name: "Fox Island Pier", lat: 47.2286, lon: -122.5898 };
@@ -190,15 +195,15 @@ async function fetchNOAA(stationId, product, extraParams, beginDateStr) {
 }
 
 async function fetchTide(beginDateStr) {
-  let stationUsed = STATIONS.gigHarbor;
+  let stationUsed = STATIONS.primary;
   let curveData, hiloData;
   try {
-    curveData = await fetchNOAA(STATIONS.gigHarbor.id, "predictions", "", beginDateStr);
-    hiloData = await fetchNOAA(STATIONS.gigHarbor.id, "predictions", "&interval=hilo", beginDateStr);
+    curveData = await fetchNOAA(STATIONS.primary.id, "predictions", "", beginDateStr);
+    hiloData = await fetchNOAA(STATIONS.primary.id, "predictions", "&interval=hilo", beginDateStr);
   } catch (e) {
-    stationUsed = STATIONS.tacoma;
-    curveData = await fetchNOAA(STATIONS.tacoma.id, "predictions", "", beginDateStr);
-    hiloData = await fetchNOAA(STATIONS.tacoma.id, "predictions", "&interval=hilo", beginDateStr);
+    stationUsed = STATIONS.fallback;
+    curveData = await fetchNOAA(STATIONS.fallback.id, "predictions", "", beginDateStr);
+    hiloData = await fetchNOAA(STATIONS.fallback.id, "predictions", "&interval=hilo", beginDateStr);
   }
   const curve = curveData.predictions.map((p) => ({ t: parseWallClock(p.t), v: parseFloat(p.v) }));
   const hilo = hiloData.predictions.map((p) => ({ t: parseWallClock(p.t), v: parseFloat(p.v), type: p.type }));
@@ -212,11 +217,18 @@ async function fetchWeather() {
   return data;
 }
 
-async function fetchMarine() {
-  const url = `https://marine-api.open-meteo.com/v1/marine?latitude=${SITE.lat}&longitude=${SITE.lon}&hourly=sea_surface_temperature&timezone=America%2FLos_Angeles&forecast_days=2&temperature_unit=fahrenheit`;
+async function fetchWaterTemp() {
+  // Open-Meteo's marine model has no coverage inside Puget Sound, so we use
+  // the nearest NOAA station that reports observed water temperature. Tacoma
+  // (9446484) is ~10 mi away in the Sound; Gig Harbor does not offer the product.
+  const url = `https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?station=${STATIONS.primary.id}&product=water_temperature&time_zone=lst_ldt&units=english&format=json&date=latest`;
   const res = await fetch(url);
   const data = await res.json();
-  return data;
+  if (data.error) throw new Error(data.error.message || "NOAA water temp error");
+  const latest = data?.data?.[data.data.length - 1];
+  const temp = latest ? parseFloat(latest.v) : NaN;
+  if (!Number.isFinite(temp)) throw new Error("No water temperature reading");
+  return { temp, station: STATIONS.primary, observedAt: latest.t };
 }
 
 async function askClaude(prompt) {
@@ -339,7 +351,7 @@ function Chip({ icon: Icon, label, value, sub }) {
         {Icon ? <Icon size={12} strokeWidth={2} /> : null}
         <span className="uppercase tracking-wide" style={{ fontSize: 12 }}>{label}</span>
       </div>
-      <div className="mono leading-none" style={{ fontSize: 18, color: THEME.ink }}>{value}</div>
+      <div className="mono leading-none" style={{ fontSize: 18, color: value === "…" ? THEME.bite : THEME.ink }}>{value}</div>
       <div style={{ fontSize: 12, color: THEME.slackDeep, minHeight: 12 }}>{sub || "\u00A0"}</div>
     </div>
   );
@@ -440,9 +452,6 @@ export default function Slackfin() {
   const [aiLoading, setAiLoading] = useState(false);
   const aiRequested = useRef(false);
 
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
 
   const [catches, setCatches] = useState([]);
   const [showLogForm, setShowLogForm] = useState(false);
@@ -498,19 +507,19 @@ export default function Slackfin() {
     const nextErrors = {};
     const beginStr = toNOAADateStr(pacificNowPseudo());
 
-    const [tideRes, wxRes, marineRes] = await Promise.allSettled([
+    const [tideRes, wxRes, waterRes] = await Promise.allSettled([
       fetchTide(beginStr),
       fetchWeather(),
-      fetchMarine(),
+      fetchWaterTemp(),
     ]);
 
     if (tideRes.status === "fulfilled") setTide(tideRes.value);
-    else nextErrors.tide = "Couldn't reach NOAA tide data. Try refreshing.";
+    else nextErrors.tide = "NOAA's tide data is currently down. Please check back soon.";
 
     if (wxRes.status === "fulfilled") setWx(wxRes.value);
     else nextErrors.wx = "Couldn't reach weather data.";
 
-    if (marineRes.status === "fulfilled") setMarine(marineRes.value);
+    if (waterRes.status === "fulfilled") setMarine(waterRes.value);
     else nextErrors.marine = "Water temperature unavailable right now.";
 
     setErrors(nextErrors);
@@ -555,12 +564,8 @@ export default function Slackfin() {
   }, [wx]);
 
   const sst = useMemo(() => {
-    if (!marine?.hourly?.time) return null;
-    const times = marine.hourly.time.map(parseWallClock);
-    let bestI = 0, bestDiff = Infinity;
-    times.forEach((t, i) => { const d = Math.abs(t - now); if (d < bestDiff) { bestDiff = d; bestI = i; } });
-    return marine.hourly.sea_surface_temperature?.[bestI] ?? null;
-  }, [marine, now]);
+    return Number.isFinite(marine?.temp) ? marine.temp : null;
+  }, [marine]);
 
   const nextHigh = useMemo(() => {
     if (!tide?.hilo) return null;
@@ -589,52 +594,67 @@ export default function Slackfin() {
     aiRequested.current = true;
     setAiLoading(true);
     const w = windows[0];
-    const prompt = `You are a local angler giving a quick, plain-spoken read on fishing conditions at Fox Island Pier, Marine Area 13, South Puget Sound, Washington. Use only the facts below. Do not invent regulations, limits, or facts not given. Do not use em dashes or semicolons. Keep it to 3 short sentences, casual and direct, no bullet points.
+
+    // Pull extra weather signals at the current hour so the read can key off
+    // whatever actually stands out today rather than reciting the same stats.
+    const wxIdx = (() => {
+      const times = (wx?.hourly?.time || []).map(parseWallClock);
+      let bestI = -1, bestDiff = Infinity;
+      times.forEach((t, i) => { const d = Math.abs(t - now); if (d < bestDiff) { bestDiff = d; bestI = i; } });
+      return bestI;
+    })();
+    const airTemp = wxIdx >= 0 ? wx?.hourly?.temperature_2m?.[wxIdx] : null;
+    const cloud = wxIdx >= 0 ? wx?.hourly?.cloud_cover?.[wxIdx] : null;
+    const precip = wxIdx >= 0 ? wx?.hourly?.precipitation?.[wxIdx] : null;
+    const sky = cloud == null ? "unknown"
+      : cloud >= 80 ? "overcast" : cloud >= 40 ? "partly cloudy" : "mostly clear";
+
+    // Where the sun is relative to now, since dawn and dusk drive the bite.
+    const daylight = (() => {
+      if (!todaySun) return "unknown";
+      if (now < todaySun.sunrise) return `before sunrise (sunrise ${formatTime(todaySun.sunrise)})`;
+      if (now > todaySun.sunset) return `after sunset (sunset was ${formatTime(todaySun.sunset)})`;
+      const toSet = (todaySun.sunset - now) / 3600000;
+      if (toSet < 2) return `approaching dusk (sunset ${formatTime(todaySun.sunset)})`;
+      const sinceRise = (now - todaySun.sunrise) / 3600000;
+      if (sinceRise < 2) return `early after sunrise (${formatTime(todaySun.sunrise)})`;
+      return "midday, well past the dawn bite";
+    })();
+
+    // How the best window sits relative to right now, so it can say whether to
+    // fish now or wait, instead of just listing a time range.
+    const windowRelation = !w ? "no strong window found in the next 24 to 30 hours"
+      : now >= w.start && now <= w.end ? `we are inside the best window right now (runs to ${formatTime(w.end)}, score ${w.avg}/100)`
+      : now < w.start ? `the best window is still ahead, ${formatTime(w.start)} to ${formatTime(w.end)} (score ${w.avg}/100)`
+      : `the best window already passed, next data-driven pick is ${formatTime(w.start)} to ${formatTime(w.end)}`;
+
+    const prompt = `You are a local angler giving a quick, plain-spoken read on fishing conditions at Fox Island Pier, Marine Area 13, South Puget Sound, Washington. Use only the facts below. Do not invent regulations, limits, or facts not given. Do not use em dashes or semicolons.
 
 Facts:
-- Tide direction right now: ${currentPoint.rate < 0 ? "outgoing (falling)" : "incoming (rising)"}, moving ${Math.abs(currentPoint.rate).toFixed(2)} ft/hr
-- Current tide height: ${currentPoint.v.toFixed(1)} ft
-- Barometric pressure trend: ${currentPoint.pressureDelta <= -1 ? "falling" : currentPoint.pressureDelta >= 2 ? "rising fast" : "steady"}
-- Wind speed: ${Math.round(currentPoint.windSpeed)} mph
+- Tide right now: ${currentPoint.rate < 0 ? "outgoing (falling)" : "incoming (rising)"}, moving ${Math.abs(currentPoint.rate).toFixed(2)} ft/hr, height ${currentPoint.v.toFixed(1)} ft
+- Barometric pressure: ${currentPoint.pressureDelta <= -1 ? "falling" : currentPoint.pressureDelta >= 2 ? "rising fast" : "steady"}
+- Wind: ${Math.round(currentPoint.windSpeed)} mph
+- Sky: ${sky}${precip != null && precip > 0 ? `, ${precip.toFixed(2)} in precip` : ", no rain"}${airTemp != null ? `, air ${Math.round(airTemp)}F` : ""}
+- Water temperature: ${sst != null ? `${sst.toFixed(0)}F` : "unavailable"}
+- Time of day: ${daylight}
 - Moon: ${moon.name}
-- Best predicted window in next 24 to 30 hours: ${w ? `${formatTime(w.start)} to ${formatTime(w.end)} (score ${w.avg}/100)` : "no strong window found"}
-- Local note: the south end of Fox Island is known to fish best on the outgoing tide
+- Best predicted window: ${windowRelation}
+- Local knowledge: the south end of Fox Island fishes best on the outgoing tide
 
-Give your honest read of whether now, or the upcoming window, looks worth fishing, and why, in your own words.
+Instructions:
+- Lead with whatever stands out most today. Do not recite every fact.
+- Name only the one or two factors that actually drive your call. Pick different angles on different days depending on which conditions are notable.
+- Be honest when it is a mediocre or slow read. Do not force optimism.
 
 Respond in exactly this format with no other text:
 VERDICT: [one short punchy sentence, max 12 words, giving your bottom-line take]
-WHY: [2-3 sentences of supporting reasoning, casual and direct, no em dashes or semicolons]`;
+WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on the factors that matter most right now, no em dashes or semicolons]`;
     askClaude(prompt)
       .then((text) => setAiVerdict(text || localVerdict()))
       .catch(() => setAiVerdict(localVerdict()))
       .finally(() => setAiLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPoint, windows]);
-
-  async function sendChat() {
-    const question = chatInput.trim();
-    if (!question || chatLoading) return;
-    setChatInput("");
-    const nextMessages = [...chatMessages, { role: "user", text: question }];
-    setChatMessages(nextMessages);
-    setChatLoading(true);
-    const w = windows[0];
-    const context = `Conditions right now at Fox Island Pier, Marine Area 13: tide ${currentPoint?.rate < 0 ? "outgoing" : "incoming"} at ${currentPoint ? Math.abs(currentPoint.rate).toFixed(2) : "?"} ft/hr, height ${currentPoint?.v?.toFixed(1)} ft, pressure ${currentPoint?.pressureDelta <= -1 ? "falling" : currentPoint?.pressureDelta >= 2 ? "rising fast" : "steady"}, wind ${Math.round(currentPoint?.windSpeed || 0)} mph, moon ${moon.name}, water temp ${sst ? sst.toFixed(1) + "F" : "unknown"}. Best predicted window: ${w ? `${formatTime(w.start)} to ${formatTime(w.end)}` : "none strong"}.`;
-    const prompt = `You are a local angler chatting with a friend about fishing Fox Island Pier in Marine Area 13, South Puget Sound. Use only the facts given below and general, well known angling knowledge. Never state specific catch limits, season dates, or legal rules. If asked about rules or limits, say to check the WDFW site. Do not use em dashes or semicolons. Keep answers short, 2 to 4 sentences, plain spoken.
-
-Facts: ${context}
-
-Question: ${question}`;
-    try {
-      const answer = await askClaude(prompt);
-      setChatMessages((cur) => [...cur, { role: "assistant", text: answer || "Couldn't get a read on that just now." }]);
-    } catch (e) {
-      setChatMessages((cur) => [...cur, { role: "assistant", text: "Couldn't reach the almanac just now. Try again in a bit." }]);
-    } finally {
-      setChatLoading(false);
-    }
-  }
 
   async function saveCatch() {
     if (!form.species.trim()) return;
@@ -791,11 +811,17 @@ Question: ${question}`;
           </button>
         </div>
 
+        {Object.keys(errors).length > 0 && (
+          <div className="mb-3 px-3 py-2 rounded-lg" style={{ fontSize: 14, background: "#FBE4DC", color: THEME.bite, lineHeight: 1.45 }}>
+            {Object.values(errors).join(" ")}
+          </div>
+        )}
+
         {/* live conditions strip */}
         <div className="grid grid-cols-4 gap-2 mb-4">
           <Chip icon={Waves} label="Tide" value={currentPoint ? `${currentPoint.v.toFixed(1)} ft` : "…"}
             sub={currentPoint ? (currentPoint.rate < 0 ? "outgoing" : "incoming") : ""} />
-          <Chip icon={Thermometer} label="Water" value={sst ? `${sst.toFixed(0)}°F` : "n/a"} sub="approx, SST model" />
+          <Chip icon={Thermometer} label="Water" value={sst != null ? `${sst.toFixed(0)}°F` : "n/a"} sub={sst != null ? "NOAA Tacoma" : "unavailable"} />
           <Chip icon={Wind} label="Wind" value={currentPoint ? `${Math.round(currentPoint.windSpeed)} mph` : "…"} />
           <Chip icon={Gauge} label="Pressure" value={currentPoint ? `${Math.round(currentPoint.pressureNow)} hPa` : "…"}
             sub={currentPoint ? (currentPoint.pressureDelta <= -1 ? "falling" : currentPoint.pressureDelta >= 2 ? "rising" : "steady") : ""} />
@@ -811,18 +837,20 @@ Question: ${question}`;
           ) : null}
         </div>
 
-        {Object.keys(errors).length > 0 && (
-          <div className="mb-3 px-3 py-2 rounded-lg" style={{ fontSize: 14, background: "#FBE4DC", color: THEME.ink, lineHeight: 1.45 }}>
-            {Object.values(errors).join(" ")}
-          </div>
-        )}
-
         {/* verdict card */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink }}>Conditions Score</div>
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink, fontWeight: 600 }}>Conditions Score</div>
           <div className="flex flex-col gap-3">
             <div className="flex justify-center">
-              {currentPoint ? <ScoreStamp score={currentPoint.score} /> : <Loader2 className="animate-spin" size={28} />}
+              {currentPoint ? (
+                <ScoreStamp score={currentPoint.score} />
+              ) : errors.tide ? (
+                <p className="text-center" style={{ fontSize: 14, color: THEME.bite, lineHeight: 1.45 }}>
+                  NOAA's tide data is currently down. Please check back soon.
+                </p>
+              ) : (
+                <Loader2 className="animate-spin" size={28} />
+              )}
             </div>
             <div className="w-full min-w-0">
               {aiLoading && !aiVerdict ? (
@@ -874,7 +902,7 @@ Question: ${question}`;
         {/* tide chart */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="flex items-center justify-between mb-2">
-            <span className="uppercase tracking-wide" style={{ fontSize: 13, color: THEME.ink }}>
+            <span className="uppercase tracking-wide" style={{ fontSize: 13, color: THEME.ink, fontWeight: 600 }}>
               Tide, next 42 hours
             </span>
             {currentPoint ? (
@@ -886,6 +914,10 @@ Question: ${question}`;
           </div>
           {series.length ? (
             <TideChart series={series} nowMs={now} windows={windows} sunriseEvents={sunriseEvents} sunsetEvents={sunsetEvents} currentPoint={currentPoint} />
+          ) : errors.tide ? (
+            <div className="h-40 flex items-center justify-center text-center px-4" style={{ fontSize: 14, color: THEME.bite, lineHeight: 1.45 }}>
+              NOAA's tide data is currently down. Please check back soon.
+            </div>
           ) : (
             <div className="h-40 flex items-center justify-center" style={{ color: THEME.slackDeep }}>
               <Loader2 className="animate-spin mr-2" size={16} /> Loading tide curve…
@@ -901,7 +933,7 @@ Question: ${question}`;
         {/* best windows */}
         {windows.length > 0 && (
           <div className="mb-4">
-            <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.slackDeep }}>Best windows ahead</div>
+            <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.slackDeep, fontWeight: 600 }}>Best windows ahead</div>
             <div className="flex gap-2 flex-wrap">
               {windows.slice(0, 4).map((w, i) => (
                 <div key={i} className="rounded-lg px-3 py-1.5 mono"
@@ -914,71 +946,11 @@ Question: ${question}`;
           </div>
         )}
 
-        {/* ask panel */}
-        <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink }}>Ask about conditions</div>
-          <p className="mb-2" style={{ fontSize: 14, color: THEME.slackDeep, lineHeight: 1.45 }}>
-            Ask anything about current conditions at the pier.
-          </p>
-          {chatMessages.length > 0 && (
-            <div className="flex flex-col gap-2 mb-3 max-h-64 overflow-y-auto">
-              {chatMessages.map((m, i) => (
-                <div key={i} className={`rounded-lg px-3 py-2 ${m.role === "user" ? "self-end" : "self-start"}`}
-                  style={{
-                    background: m.role === "user" ? THEME.ink : THEME.paperDeep,
-                    color: m.role === "user" ? THEME.white : THEME.ink,
-                    fontSize: 16,
-                    lineHeight: 1.45,
-                    maxWidth: "85%",
-                  }}>
-                  {m.text}
-                </div>
-              ))}
-              {chatLoading && (
-                <div className="flex items-center gap-2" style={{ fontSize: 14, color: THEME.slackDeep }}>
-                  <Loader2 className="animate-spin" size={12} /> thinking…
-                </div>
-              )}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <input
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") sendChat(); }}
-              placeholder="Worth fishing the evening tide?"
-              className="flex-1 rounded-lg px-3 py-2 "
-              style={{ fontSize: 16, border: `1px solid ${THEME.line}`, background: THEME.paper, color: THEME.ink }}
-            />
-            <button
-              onClick={sendChat}
-              disabled={chatLoading || !chatInput.trim()}
-              className="rounded-lg px-3 flex items-center justify-center motion-safe:transition-opacity disabled:opacity-40"
-              style={{ background: THEME.kelp, color: THEME.white }}
-              aria-label="Send question"
-            >
-              <Send size={15} />
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {["Is the morning tide better than evening?", "Does wind affect the bite today?"].map((q) => (
-              <button
-                key={q}
-                onClick={() => setChatInput(q)}
-                className="rounded-full px-3 py-1"
-                style={{ fontSize: 12, background: THEME.paperDeep, color: THEME.ink, border: `1px solid ${THEME.line}` }}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* catch log */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-1.5" style={{ color: THEME.ink }}>
-              <span className="uppercase tracking-wide" style={{ fontSize: 13 }}>Community catch log</span>
+              <span className="uppercase tracking-wide" style={{ fontSize: 13, fontWeight: 600 }}>Community catch log</span>
             </div>
             <button
               onClick={() => setShowLogForm((s) => !s)}
@@ -1148,7 +1120,7 @@ Question: ${question}`;
 
         {/* regs reminder */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.paperDeep, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink }}>Know before you go</div>
+          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink, fontWeight: 600 }}>Know before you go</div>
           <ul className="leading-relaxed list-disc pl-4" style={{ fontSize: 14, color: THEME.ink }}>
             <li>Open 7 a.m. to dusk.</li>
             <li>Marine Area 13 is the only Washington marine area open to salmon fishing year round, and it allows the two-pole endorsement.</li>
@@ -1206,14 +1178,14 @@ Question: ${question}`;
         <button
           onClick={() => setShowAbout((s) => !s)}
           className="w-full text-left uppercase tracking-wide flex items-center justify-between py-2"
-          style={{ fontSize: 13, color: THEME.ink }}
+          style={{ fontSize: 13, color: THEME.ink, fontWeight: 600 }}
         >
           About this tool {showAbout ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
         </button>
         {showAbout && (
           <div className="flex flex-col gap-2 pb-4">
             {[
-              { label: "Data sources", desc: "Tide from NOAA, weather and water temperature from Open-Meteo." },
+              { label: "Data sources", desc: "Tide and water temperature from NOAA, weather from Open-Meteo." },
               { label: "AI summary", desc: "The written read is generated by Claude based on the same numbers shown above." },
               { label: "Scoring", desc: "A starting point from general fishing guidance for this spot, not a guarantee." },
               { label: "Your catch log", desc: "Private to this site, saved so you can look back on past trips." },
