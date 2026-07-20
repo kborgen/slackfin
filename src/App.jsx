@@ -365,7 +365,7 @@ function FishRating({ score }) {
   const filled = Math.max(1, Math.min(5, Math.round(score / 20)));
 
   return (
-    <div className="flex flex-col items-center gap-1 shrink-0" style={{ width: 84 }}>
+    <div className="flex flex-col items-center gap-2 shrink-0" style={{ width: 84 }}>
       <div
         role="img"
         aria-label={`${filled} of 5 fish, ${label.toLowerCase()} conditions, score ${score} of 100`}
@@ -828,7 +828,7 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
               </h1>
             </div>
             <p style={{ fontSize: 14, color: THEME.slackDeep, marginTop: 4, marginBottom: 12, lineHeight: 1.45 }}>
-              Know before you go: tide, weather, and a bite report, in tow.
+              Live tide, weather, and a fishing read for the Fox Island Pier.
             </p>
             <div className="flex items-center gap-1.5 mt-2">
               <MapPin size={15} style={{ color: THEME.kelp }} />
@@ -893,8 +893,8 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
 
         {/* verdict card */}
         <div className="rounded-2xl p-4 mb-4" style={{ background: THEME.white, border: `1px solid ${THEME.line}` }}>
-          <div className="uppercase tracking-wide mb-2" style={{ fontSize: 13, color: THEME.ink, fontWeight: 600 }}>Conditions Score</div>
-          <div className="flex flex-col gap-3">
+          <div className="uppercase tracking-wide mb-4" style={{ fontSize: 13, color: THEME.ink, fontWeight: 600 }}>Conditions Score</div>
+          <div className="flex flex-col gap-5">
             <div className="flex justify-center">
               {currentPoint ? (
                 <FishRating score={currentPoint.score} />
