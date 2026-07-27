@@ -21,11 +21,18 @@ const PAPER = "#E4F5FB";
 
 // Browser tabs render at 16-32px, so the favicon gets a tight crop for
 // legibility. Home-screen icons get 10% so iOS's rounded mask has room.
+//
+// The maskable variant needs more: Android crops to an arbitrary shape, and
+// the spec only guarantees a centered circle of 40%-of-width radius. The wave
+// is ~1.89:1, so the widest it can be and still fit that circle is ~70.7%
+// (~14.6% padding); 18% clears it with margin. It is meant to look inset —
+// the launcher does the cropping, and the paper bleeds to the shape's edge.
 const TARGETS = [
   { file: "favicon-32.png", size: 32, padding: 0.04 },
   { file: "apple-touch-icon.png", size: 180, padding: 0.1 },
   { file: "icon-192.png", size: 192, padding: 0.1 },
   { file: "icon-512.png", size: 512, padding: 0.1 },
+  { file: "icon-512-maskable.png", size: 512, padding: 0.18 },
 ];
 
 /** Trim the surrounding paper so padding is measured against the artwork. */
