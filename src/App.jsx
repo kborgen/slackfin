@@ -256,6 +256,11 @@ async function askClaude(prompt) {
    weighted a bit higher than incoming. Dawn and dusk get a
    bonus. Falling or steady barometric pressure gets a bonus,
    a sharp rise gets a penalty. Strong wind gets a penalty.
+   The raw number is then normalized against the best moment in
+   the same 42-hour window, so the score reads as "how good is
+   this compared to the rest of the window" rather than as an
+   absolute. A floor keeps a genuinely flat stretch from grading
+   its own mediocre peak as excellent.
    This is a starting heuristic, not a guarantee. See "How this
    works" in the app, and your own catch log, for the real word. */
 
@@ -283,30 +288,33 @@ function buildSeries(curve, wx, nowMs) {
     return bestI;
   };
 
-  return curve.map((p, i) => {
+  const points = curve.map((p, i) => {
     const rate = rates[i];
     const normRate = Math.min(Math.abs(rate) / maxAbsRate, 1);
-    const movement = normRate * (rate < 0 ? 1 : 0.45);
+    const movement = normRate * (rate < 0 ? 1 : 0.7);
 
     let minDist = Infinity;
     for (const ev of sunEvents) {
       const d = Math.abs(p.t - ev) / 60000;
       if (d < minDist) minDist = d;
     }
-    const lightBonus = minDist <= 90 ? 1 - minDist / 90 : 0;
+    const lightBonus = minDist <= 120 ? Math.pow(1 - minDist / 120, 0.7) : 0;
 
     const idx = findWxIdx(p.t);
     const pressureNow = wx.hourly?.pressure_msl?.[idx] ?? null;
     const idxPrev = Math.max(0, idx - 3);
     const pressureDelta = pressureNow != null ? pressureNow - wx.hourly.pressure_msl[idxPrev] : 0;
-    const pressureFactor = pressureDelta <= -1 ? 1 : pressureDelta >= 2 ? -1 : 0.4;
+    const pressureFactor = pressureDelta <= -1 ? 1 : pressureDelta >= 2 ? -1 : 0.65;
     const windSpeed = wx.hourly?.wind_speed_10m?.[idx] ?? 0;
     const windFactor = windSpeed > 18 ? Math.min((windSpeed - 18) / 12, 1) : 0;
 
+    // Distance to the nearest new or full moon, 0 at either, 0.25 at a quarter.
     const moon = moonPhase(p.t);
-    const moonBonus = moon.phase < 0.06 || moon.phase > 0.94 || Math.abs(moon.phase - 0.5) < 0.06 ? 1 : 0;
+    const moonDist = Math.min(moon.phase, Math.abs(moon.phase - 0.5), 1 - moon.phase);
+    const moonBonus = Math.pow(1 - moonDist / 0.25, 0.8);
 
     const raw =
+      0.1 +
       0.4 * movement +
       0.2 * lightBonus +
       0.15 * Math.max(pressureFactor, 0) +
@@ -314,29 +322,72 @@ function buildSeries(curve, wx, nowMs) {
       0.05 * moonBonus -
       0.15 * windFactor;
 
-    const score = Math.max(0, Math.min(100, Math.round(raw * 100)));
-    return { ...p, rate, score, windSpeed, pressureNow, pressureDelta };
+    return { ...p, raw, rate, windSpeed, pressureNow, pressureDelta };
   });
+
+  // Below this, the whole 42h window is genuinely flat and we stop grading
+  // on a curve — otherwise every day's peak would read as excellent.
+  // This is the one tuning knob in the model.
+  const DECENT_RAW = 0.58;
+  const bestRaw = Math.max(...points.map((p) => p.raw));
+  const denom = Math.max(bestRaw, DECENT_RAW);
+
+  if (import.meta.env.DEV) {
+    const debug = { bestRaw, denom, DECENT_RAW, points: points.length };
+    globalThis.__slackfinScoring = debug;
+    console.log("[slackfin] scoring", debug);
+  }
+
+  return points.map((p) => ({
+    ...p,
+    score: Math.max(0, Math.min(100, Math.round((p.raw / denom) * 100))),
+  }));
 }
 
-function findWindows(series, thresholdScore, nowMs, horizonMs) {
-  const windows = [];
-  let cur = null;
-  for (const p of series) {
-    if (p.t < nowMs - 15 * 60000 || p.t > nowMs + horizonMs) continue;
-    if (p.score >= thresholdScore) {
-      if (!cur) cur = { start: p.t, end: p.t, scores: [p.score] };
-      else { cur.end = p.t; cur.scores.push(p.score); }
-    } else if (cur) {
-      windows.push(cur);
-      cur = null;
+/* Windows are relative too. Take the strong runs if there are any, drop the
+   bar once if there are not, and otherwise fall back to the single best span
+   in range. The avg is on screen, so a weak window still reads as weak. */
+function findWindows(series, nowMs, horizonMs) {
+  const inRange = series.filter((p) => p.t >= nowMs - 15 * 60000 && p.t <= nowMs + horizonMs);
+  if (!inRange.length) return [];
+
+  const runsAtLeast = (thresholdScore) => {
+    const windows = [];
+    let cur = null;
+    for (const p of inRange) {
+      if (p.score >= thresholdScore) {
+        if (!cur) cur = { start: p.t, end: p.t, scores: [p.score] };
+        else { cur.end = p.t; cur.scores.push(p.score); }
+      } else if (cur) {
+        windows.push(cur);
+        cur = null;
+      }
     }
-  }
-  if (cur) windows.push(cur);
-  return windows
-    .filter((w) => w.end - w.start >= 18 * 60000)
+    if (cur) windows.push(cur);
+    return windows.filter((w) => w.end - w.start >= 18 * 60000);
+  };
+
+  const spanAroundBest = () => {
+    let bestI = 0;
+    for (let i = 1; i < inRange.length; i++) {
+      if (inRange[i].score > inRange[bestI].score) bestI = i;
+    }
+    const peak = inRange[bestI].score;
+    let lo = bestI, hi = bestI;
+    while (lo > 0 && peak - inRange[lo - 1].score <= 10) lo--;
+    while (hi < inRange.length - 1 && peak - inRange[hi + 1].score <= 10) hi++;
+    const span = inRange.slice(lo, hi + 1);
+    return [{ start: span[0].t, end: span[span.length - 1].t, scores: span.map((p) => p.score) }];
+  };
+
+  let found = runsAtLeast(70);
+  if (!found.length) found = runsAtLeast(55);
+  if (!found.length) found = spanAroundBest();
+
+  return found
     .map((w) => ({ ...w, avg: Math.round(w.scores.reduce((a, b) => a + b, 0) / w.scores.length) }))
-    .sort((a, b) => b.avg - a.avg);
+    .sort((a, b) => b.avg - a.avg)
+    .slice(0, 3);
 }
 
 /* ---------------- small UI atoms ---------------- */
@@ -584,7 +635,7 @@ export default function Slackfin() {
 
   const windows = useMemo(() => {
     if (!series.length) return [];
-    return findWindows(series, 62, now, 30 * 3600000);
+    return findWindows(series, now, 30 * 3600000);
   }, [series, now]);
 
   const sunriseEvents = useMemo(() => {
@@ -945,10 +996,13 @@ WHY: [2 to 3 sentences of supporting reasoning, casual and direct, focused on th
           </button>
           {showHow && (
             <p className="mt-2 leading-relaxed" style={{ fontSize: 14, color: THEME.slackDeep }}>
-              The score weighs tide movement, dawn and dusk light, barometric pressure, wind, and moon phase.
-              Outgoing tide is weighted a bit higher here, since the south end of Fox Island is known locally
-              to fish best on the outgoing. It is a starting heuristic, not a guarantee. Log your catches below
-              and use them to check your own pattern against it.
+              The score weighs tide movement, dawn and dusk light, barometric pressure, wind, and moon phase,
+              then compares every moment against the others in the next 42 hours. Five fish means the best it
+              gets between now and then, not the best it ever gets. When the whole stretch is flat, nothing
+              rises far and everything reads low together. Outgoing tide is weighted a bit higher here, since
+              the south end of Fox Island is known locally to fish best on the outgoing. It is a starting
+              heuristic, not a guarantee. Log your catches below and use them to check your own pattern
+              against it.
             </p>
           )}
         </div>
