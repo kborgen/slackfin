@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "sample:best-raw": "node scripts/sample-best-raw.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
