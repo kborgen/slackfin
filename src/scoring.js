@@ -53,12 +53,16 @@ export function moonPhase(pseudoMs) {
   return { phase, illumination, name, emoji: emojiMap[idx] };
 }
 
-/* Below this, the whole 42h window is genuinely flat and we stop grading
-   on a curve — otherwise every day's peak would read as excellent.
-   This is the one tuning knob in the model. Run
-   `npm run sample:best-raw` to see how it sits against the historical
-   distribution of bestRaw before changing it. */
-export const DECENT_RAW = 0.58;
+// Floor for the score-normalization denominator (see buildSeries).
+// Calibrated from a 60-day historical sample (29 spring / 31 neap tides,
+// even seasonal coverage) of this raw-scoring model's own output — not
+// tuned to any single remembered day. p25 bestRaw = 0.6219, chosen so the
+// floor engages on roughly the bottom quarter of days rather than sitting
+// unreachably low. Sample details: scripts/best-raw-report.md,
+// scripts/best-raw-sample.json. Revisit once the catch log has a season
+// of entries (see PRD Phase 2) — this calibrates the floor's honesty
+// against the model's own scale, not against actual fishing outcomes.
+export const DECENT_RAW = 0.6219;
 
 /* First pass of the scoring model: everything that depends only on this
    day's own tide and weather, with no reference to the rest of the window.
